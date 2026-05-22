@@ -53,7 +53,6 @@ from transformers import (
 )
 
 from peft import LoraConfig, TaskType, get_peft_model
-from huggingface_hub import snapshot_download
 
 @dataclass(frozen=True)
 class ScoreThresholds:
@@ -455,12 +454,8 @@ def main() -> None:
     thresholds = ScoreThresholds.parse(args.score_thresholds)
     text_fields = [p.strip() for p in args.text_fields.split(",") if p.strip()]
 
-    local_dir = snapshot_download(
-        repo_id="bobotsalos/news_reports",
-        repo_type="dataset",
-    )
     rows: List[Dict[str, Any]] = []
-    for path, rec in iter_json_records(local_dir, "**/*.json"):
+    for path, rec in iter_json_records(args.input_dir, args.glob):
         text = extract_text(rec, text_fields)
         if not text:
             continue
