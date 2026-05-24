@@ -320,7 +320,7 @@ def extract_text(record: Dict[str, Any], field_paths: Sequence[str]) -> str:
 def iter_json_records(input_dir: str, pattern: str) -> Iterable[Tuple[str, Dict[str, Any]]]:
     root = os.path.abspath(input_dir)
     paths = sorted(glob.glob(os.path.join(root, pattern), recursive=True))
-    print(f"JSON Files number: {len(paths)}")
+    print(f"JSON Files number: {len(paths)}", flush=True)
 
     for path in paths:
         if not os.path.isfile(path):
@@ -390,12 +390,41 @@ def dataframe_to_dataset(df: pd.DataFrame) -> Dataset:
 def tokenize_dataset(dataset: Dataset, tokenizer, max_length: int) -> Dataset:
     def _tokenize(ex):
         messages = ex["messages"]
-        full_ids = tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=True)
-        prompt_ids = tokenizer.apply_chat_template(messages[:-1], add_generation_prompt=False, tokenize=True)
 
-        input_ids = full_ids[:max_length]
-        labels = [-100] * len(prompt_ids) + full_ids[len(prompt_ids) :]
-        labels = labels[:max_length]
+        # NOTE: Depending on the Transformers version, `apply_chat_template(..., tokenize=True)`
+        # may return a dict-like BatchEncoding (not a plain list of ints). If we treat it as an
+        # iterable, we can accidentally turn it into a list of string keys ("input_ids", ...),
+        # which then crashes padding/collation. To be robust across versions, render to text
+        # and tokenize explicitly.
+        full_text = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=False,
+            tokenize=False,
+        )
+        prompt_text = tokenizer.apply_chat_template(
+            messages[:-1],
+            add_generation_prompt=False,
+            tokenize=False,
+        )
+
+        full_enc = tokenizer(
+            full_text,
+            add_special_tokens=False,
+            truncation=True,
+            max_length=max_length,
+        )
+        prompt_enc = tokenizer(
+            prompt_text,
+            add_special_tokens=False,
+            truncation=True,
+            max_length=max_length,
+        )
+
+        input_ids = list(full_enc.get("input_ids") or [])
+        prompt_ids = list(prompt_enc.get("input_ids") or [])
+
+        prompt_len = min(len(prompt_ids), len(input_ids))
+        labels = [-100] * prompt_len + input_ids[prompt_len:]
         attention_mask = [1] * len(input_ids)
 
         return {
@@ -404,8 +433,7 @@ def tokenize_dataset(dataset: Dataset, tokenizer, max_length: int) -> Dataset:
             "attention_mask": attention_mask,
         }
 
-    tokenized = dataset.map(_tokenize, remove_columns=["messages"])
-    return tokenized
+    return dataset.map(_tokenize, remove_columns=["messages"])
 
 
 def load_model_and_tokenizer(args: argparse.Namespace):
@@ -538,7 +566,6 @@ def main() -> None:
         train_dataset=train_tok,
         eval_dataset=eval_tok,
         data_collator=data_collator,
-        tokenizer=tokenizer,
     )
 
     trainer.train()

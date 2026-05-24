@@ -140,3 +140,4 @@ FinGPT_Training_LoRA_with_Chatglm2_6b_for_beginners.ipynb
 # Benchmark data
 fingpt/FinGPT_Benchmark/data/*/**
 news_reports/
+reports*
